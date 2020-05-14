@@ -92,3 +92,39 @@ function getMeme() {
     var index = Math.floor(Math.random() * memes.length);
     return memes[index];
 }
+
+client.on('message', async msg => { 
+    if (msg.author.bot) return undefined;
+    if (!msg.content.startsWith(!PREFIX)) return undefined;
+    const args = msg.content.split(' ');
+ 
+    if (msg.content.startsWith(`${!prefix}play`)) {
+        const voiceChannel = msg.member.voiceChannel;
+        if (!voiceChannel) return msg.channel.send('I\m sorry but you need to be in a voice channel to play music!');
+        const permissions = voiceChannel.permissionsFor(msg.client.user);
+        if (!permissions.has('CONNECT')) return msg.channel.send('I cannot connect to your voice channel, make sure i have the proper premissions');    
+    }
+    if(!permissions.has('SPEAK')) {
+        return msg.channel.send('I Cannot speak in this voice channel')
+    }
+ 
+    try {
+        var connection = await voiceChannel.join();
+    } catch (error) {
+        console.error(`I could not join the voice channel${error}`);
+        return msg.channel.send(`I could not join the voice channel: ${error}`);
+    }
+ 
+    const dispatcher = connection.playStream(ytdl(args[1]))
+        .on('end', () => {
+            console.log('song ended!)');
+            voiceChannel.leave();
+        })
+        .on('error', error => {
+            console.error(error)
+        });
+    dispatcher.setVolumeLogarithmic(5 / 5);
+ 
+   
+});
+ 
