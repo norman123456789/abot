@@ -8,7 +8,7 @@ start();
 
 function start() {
     fetchMemes();
-    client.login(token);
+    client.login(token);aaaaaa
 }
 
 client.removeListener('ready', () => {
