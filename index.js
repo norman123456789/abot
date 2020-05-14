@@ -4,15 +4,22 @@ const ytdl = require('ytdl-core');
 const client = new Discord.Client();
 var memes;
 var XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
+var queue;
 start();
 
+/**
+ * Grab the memes from the API
+ * Start the bot
+ */
 function start() {
     fetchMemes();
     client.login(token);
 }
-
-client.removeListener('ready', () => {
-    console.log('Ready!');
+/**
+ * Notify when the bot is online
+ */
+client.addListener('ready', () => {
+    console.log('ABOT is now online!');
 });
 
 /**
@@ -20,14 +27,19 @@ client.removeListener('ready', () => {
  */
 client.on('message', message => {
 
+    // ignore bot messages, don't wantto go in to a loop
+    if (message.author.bot) {
+        return;
+    }
+
     // get content of message
     var content = message.content;
 
-    // content begins with the prefix and is not just the prefix
+    // content begins with the prefix and is not only the prefix
     if (content.startsWith(`${prefix}`) && content.length > 1) {
 
         // get rid of the prefix -> !dave becomes dave
-        msg = content.replace(`${prefix}`, '');
+        msg = content.replace(`${prefix}`, '').split(" ");
 
         // see if the message is a command
         executeCommand(msg, message);
@@ -37,17 +49,18 @@ client.on('message', message => {
 /**
  * Checks if a message is a command
  * 
- * @param msg message to be checked
- * @param chan channel to reply in 
+ * @param msg[] message to be checked, split on white space for commands with multiple args
+ * @param rawMsg message object -> get user/chan if needed
  */
 function executeCommand(msg, rawMsg) {
-    // starts with empty response
 
+    // starts with empty response and get the current channel
     var response;
     var chan = rawMsg.channel;
-    // check msg against commands
-    switch (msg) {
-        case 'MW':
+
+    // check msg against lowercase command triggers
+    switch (msg[0]) {
+        case 'mw':
             response = 'Model S12 Shotgun is trash lads';
             break;
         case 'b':
@@ -63,15 +76,22 @@ function executeCommand(msg, rawMsg) {
             response = 'boom';
             break;
         case 'f':
-            response = 'f'
+            response = 'f';
             break;
-
+        case 'play':
+            playAudio(rawMsg, msg[1]);
+            break;
+        case 'skip':
+            skip(chan);
+            break;
+        case 'stop':
+            response = stop();
+            break;
     }
 
     // reply with the command response
     if (response != null) {
         chan.send(response);
-        rawMsg.delete();
     }
 }
 
@@ -80,51 +100,136 @@ function executeCommand(msg, rawMsg) {
  */
 function fetchMemes() {
     var request = new XMLHttpRequest();
-    var dest = 'http://192.168.1.83/DiscordBotAPI/api/memes';
+    var dest = 'http://192.168.1.78/DiscordBotAPI/api/memes';
     request.onload = function () {
         memes = JSON.parse(request.responseText);
     }
+
+    // Not async, done only once when bot boots
     request.open('GET', dest, false);
     request.send();
 }
 
+
+/**
+ * Fetch a random meme from the many possibilities
+ */
 function getMeme() {
     var index = Math.floor(Math.random() * memes.length);
     return memes[index];
 }
 
-client.on('message', async msg => { 
-    if (msg.author.bot) return undefined;
-    if (!msg.content.startsWith(!PREFIX)) return undefined;
-    const args = msg.content.split(' ');
- 
-    if (msg.content.startsWith(`${!prefix}play`)) {
-        const voiceChannel = msg.member.voiceChannel;
-        if (!voiceChannel) return msg.channel.send('I\m sorry but you need to be in a voice channel to play music!');
-        const permissions = voiceChannel.permissionsFor(msg.client.user);
-        if (!permissions.has('CONNECT')) return msg.channel.send('I cannot connect to your voice channel, make sure i have the proper premissions');    
+/**
+ * 
+ * @param msg Message object to gain necessary info
+ * @param url URL to be played
+ */
+async function playAudio(msg, url) {
+    const vc = msg.member.voice.channel;
+
+    // User is not in a voice channel
+    if (!vc) {
+        msg.channel.send("You're not in a voice channel you donkey");
+        return;
     }
-    if(!permissions.has('SPEAK')) {
-        return msg.channel.send('I Cannot speak in this voice channel')
+
+    const perms = vc.permissionsFor(msg.guild.me);
+
+    // Bot cannot join/speak in the current voice channel
+    if (!perms.has("CONNECT") || !perms.has("SPEAK")) {
+        msg.channel.send("I need 'connect' and 'speak' voice channel permissions!");
+        return;
     }
- 
     try {
-        var connection = await voiceChannel.join();
-    } catch (error) {
-        console.error(`I could not join the voice channel${error}`);
-        return msg.channel.send(`I could not join the voice channel: ${error}`);
+
+        // Get the song info and map in to a song object
+        const songInfo = await ytdl.getInfo(url);
+        const song = {
+            title: songInfo.title,
+            url: songInfo.video_url,
+        };
+
+        // Music already playing, add the song to the queue
+        if (queue) {
+            queue.songs.push(song);
+            msg.channel.send(`**${song.title}** has been added to the queue!`);
+            return;
+        }
+
+        // Empty queue
+        else {
+
+            // Create the queue
+            queue = {
+                textChannel: msg.channel,
+                voiceChannel: vc,
+                connection: null,
+                songs: [],
+                volume: 5,
+                playing: true,
+            };
+
+            // Add the song to the queue
+            queue.songs.push(song);
+        }
+
+        // Get the voice channel connection
+        queue.connection = await vc.join();
+
+        // Play the song
+        play(song);
     }
- 
-    const dispatcher = connection.playStream(ytdl(args[1]))
-        .on('end', () => {
-            console.log('song ended!)');
-            voiceChannel.leave();
+    catch (err) {
+        console.log(err);
+        msg.channel.send("Sorry, I wasn't able to play that video!");
+    }
+}
+
+/**
+ * Play the current song in the queue, delete the queue if there are no more songs 
+ * @param song Song to be played 
+ */
+function play(song) {
+    if (!song) {
+        queue.voiceChannel.leave();
+        queue = null;
+        return;
+    }
+
+    const dispatcher = queue.connection
+        .play(ytdl(song.url))
+        .on("finish", () => {
+            queue.songs.shift();
+            play(queue.songs[0]);
         })
-        .on('error', error => {
-            console.error(error)
-        });
-    dispatcher.setVolumeLogarithmic(5 / 5);
- 
-   
-});
- 
+        .on("error", error => console.error(error));
+
+    queue.textChannel.send(`Start playing: **${song.title}**`);
+}
+
+/**
+ * Skip the current song in the queue, display the remaining number of songs
+ * @param chan Text channel to notify user of queue status 
+ */
+function skip(chan) {
+    if (!queue) {
+        chan.send("There's nothing in the queue to skip!");
+    }
+    var title = queue.songs[0].title;
+    queue.songs.shift();
+    var remaining = (queue.songs.length == 0) ? " There is nothing left in the queue!" : ` There are **${queue.songs.length}** songs left in the queue!`;
+    chan.send(`\nSkipping **${title}**, ${remaining}`);
+    play(queue.songs[0]);
+}
+
+/**
+ * Stop the music and empty the queue
+ */
+function stop(){
+    if(!queue){
+        return "There is no music to stop!";
+    }
+    queue.songs = [];
+    queue.connection.dispatcher.end();
+    return "Music stopped!";
+}
