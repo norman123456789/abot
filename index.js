@@ -96,18 +96,11 @@ function executeCommand(msg, rawMsg) {
 }
 
 /**
- * Fetch the memes from the database and save in to the memes variable
+ * Fetch the memes from the json file and save in to the memes array
  */
 function fetchMemes() {
-    var request = new XMLHttpRequest();
-    var dest = 'http://192.168.1.78/DiscordBotAPI/api/memes';
-    request.onload = function () {
-        memes = JSON.parse(request.responseText);
-    }
-
-    // Not async, done only once when bot boots
-    request.open('GET', dest, false);
-    request.send();
+    const fs = require('fs');
+    memes = JSON.parse(fs.readFileSync('meme_command.json'))["meme"];
 }
 
 
@@ -116,7 +109,7 @@ function fetchMemes() {
  */
 function getMeme() {
     var index = Math.floor(Math.random() * memes.length);
-    return memes[index];
+    return memes[index]["possibility"];
 }
 
 /**
